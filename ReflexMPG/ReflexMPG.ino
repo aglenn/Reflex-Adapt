@@ -305,17 +305,17 @@ void configureOutput(InputMode currentMode) {
 #ifdef ENABLE_REFLEX_SATURN
       case RZORD_SATURN:
         display.setCol(2*6);
-        display.print(F("GENESIS + SATURN"));
+        display.print(F("GENESIS+SATURN"));
         break;
 #endif
 #ifdef ENABLE_REFLEX_SNES
       case RZORD_SNES:
         #ifdef SNES_ENABLE_VBOY
           display.setCol(2*6);
-          display.print(F("NES + SNES + VBOY"));
+          display.print(F("NES+SNES+VBOY"));
         #else
           display.setCol(6*6);
-          display.print(F("NES + SNES"));
+          display.print(F("NES+SNES"));
         #endif
         break;
 #endif
@@ -390,10 +390,10 @@ void configureOutput(InputMode currentMode) {
       case RZORD_N64:
         #ifdef N64_ANALOG_MAX
           display.setCol(1*6);
-          display.print(F("N64 EXTENDED RANGE"));
+          display.print(F("N64 MORE RANGE"));
         #else
           display.setCol(1*6);
-          display.print(F("N64 ORIGINAL RANGE"));
+          display.print(F("N64 ORIG RANGE"));
         #endif
         break;
 #endif

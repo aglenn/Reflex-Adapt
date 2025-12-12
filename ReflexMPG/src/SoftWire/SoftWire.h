@@ -23,7 +23,7 @@
 #define _SoftWire_h
 
 #include <inttypes.h>
-#include "Stream.h"
+#include "SoftWireInterface.h"
 
 #ifndef I2C_BUFFER_LENGTH
   #define I2C_BUFFER_LENGTH 32
@@ -32,7 +32,7 @@
 // WIRE_HAS_END means Wire has end()
 #define WIRE_HAS_END 1
 
-class SoftWire : public Stream // @suppress("Class has a virtual method and non-virtual destructor")
+class SoftWire : public SoftWireInterface // @suppress("Class has a virtual method and non-virtual destructor")
 {
 private:
   uint8_t rxBuffer[I2C_BUFFER_LENGTH];

@@ -48,7 +48,7 @@
 #define I2C_PULLUP 1
 //--------------
 #include "../../SoftWire/SoftWire.h"
-#define NXC_I2C_TYPE SoftWire
+#define NXC_I2C_TYPE SoftWireInterface
 
 #endif
 

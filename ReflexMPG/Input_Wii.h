@@ -36,18 +36,32 @@
 #include "src/SoftWire/SoftWire.h"
 #include "src/NintendoExtensionCtrl/NintendoExtensionCtrl.h"
 
+// Port 2 software I2C (separate pins)
+#undef SCL_PIN
+#undef SCL_PORT
+#undef SDA_PIN
+#undef SDA_PORT
+#define SCL_PIN 2  // D16/PB2 on 32u4
+#define SCL_PORT PORTB
+#define SDA_PIN 3  // D14/PB3 on 32u4
+#define SDA_PORT PORTB
+
+// Ensure SoftWire2 brings in its implementation
+#undef USE_SOFTWIRE_H_AS_PLAIN_INCLUDE
+#include "src/SoftWire/SoftWire2.h"
+
 #define WII_ANALOG_DEFAULT_CENTER 127U
 
 class ReflexInputWii : public RZInputModule {
   private:
-    ExtensionPort* wii;
-    ClassicController::Shared* wii_classic;
-    Nunchuk::Shared* wii_nchuk;
+    ExtensionPort* wii[2];
+    ClassicController::Shared* wii_classic[2];
+    Nunchuk::Shared* wii_nchuk[2];
     #ifdef ENABLE_WII_GUITAR
-      GuitarController::Shared* wii_guitar;
+      GuitarController::Shared* wii_guitar[2];
     #endif
 
-    bool needDetectAnalogTrigger;
+    bool needDetectAnalogTrigger[2];
 
     void wiiResetAnalogMinMax() {
       //n64_x_min = -50;
@@ -160,339 +174,308 @@ class ReflexInputWii : public RZInputModule {
     
       //SoftWire initialization
       Wire.begin();
+      Wire2.begin();
     
       //Will use 400khz if I2C_FASTMODE 1.
       //Wire.setClock(100000UL);
       //Wire.setClock(400000UL);
     
-      wii = new ExtensionPort(Wire);
-      wii_classic = new ClassicController::Shared(*wii);
-      wii_nchuk = new Nunchuk::Shared(*wii);
-      #ifdef ENABLE_WII_GUITAR
-        wii_guitar = new GuitarController::Shared(*wii);
-      #endif
-    
-      wii->begin();
+      totalUsb = 2;
 
-      hasLeftAnalogStick[0] = true;
-      hasRightAnalogStick[0] = true;
-
-      needDetectAnalogTrigger = true;
+      wii[0] = new ExtensionPort(Wire);
+      wii[1] = new ExtensionPort(Wire2);
+      for (uint8_t i = 0; i < totalUsb; ++i) {
+        wii_classic[i] = new ClassicController::Shared(*wii[i]);
+        wii_nchuk[i] = new Nunchuk::Shared(*wii[i]);
+        #ifdef ENABLE_WII_GUITAR
+          wii_guitar[i] = new GuitarController::Shared(*wii[i]);
+        #endif
+        wii[i]->begin();
+        hasLeftAnalogStick[i] = true;
+        hasRightAnalogStick[i] = true;
+        needDetectAnalogTrigger[i] = true;
+      }
 
       delay(50);
     }
 
     void setup2() override {
-      needDetectAnalogTrigger = true;
+      for (uint8_t i = 0; i < totalUsb; ++i) {
+        needDetectAnalogTrigger[i] = true;
+      }
     }
 
     bool read() override {
-      static uint8_t lastControllerCount = 0;
-      static boolean haveController = false;
-      static bool isClassicAnalog = false;
-      static uint16_t oldButtons = 0;
-      static uint8_t oldHat = 0;
-      static uint8_t oldLX = WII_ANALOG_DEFAULT_CENTER, oldLY = WII_ANALOG_DEFAULT_CENTER;
-      static uint8_t oldRX = WII_ANALOG_DEFAULT_CENTER, oldRY = WII_ANALOG_DEFAULT_CENTER;
-      static uint8_t oldLT = 0, oldRT = 0;
+      static boolean haveController[2] = { false, false };
+      static bool isClassicAnalog[2] = { false, false };
+      static uint16_t oldButtons[2] = { 0, 0 };
+      static uint8_t oldHat[2] = { 0, 0 };
+      static uint8_t oldLX[2] = { WII_ANALOG_DEFAULT_CENTER, WII_ANALOG_DEFAULT_CENTER };
+      static uint8_t oldLY[2] = { WII_ANALOG_DEFAULT_CENTER, WII_ANALOG_DEFAULT_CENTER };
+      static uint8_t oldRX[2] = { WII_ANALOG_DEFAULT_CENTER, WII_ANALOG_DEFAULT_CENTER };
+      static uint8_t oldRY[2] = { WII_ANALOG_DEFAULT_CENTER, WII_ANALOG_DEFAULT_CENTER };
+      static uint8_t oldLT[2] = { 0, 0 };
+      static uint8_t oldRT[2] = { 0, 0 };
 
       #ifndef WII_ANALOG_RAW
-        //Trigger L and R range
-        //classic: I've seen it go from 5 to 255. More common is 5 to 245
-        //classic pro: 0 or 248
         const uint8_t wii_analog_stick_min = 25;
         const uint8_t wii_analog_stick_max = 230;
         const uint8_t wii_analog_trigger_min = 14;
-        static uint8_t wii_lx_shift = 0;
-        static uint8_t wii_ly_shift = 0;
-        static uint8_t wii_rx_shift = 0;
-        static uint8_t wii_ry_shift = 0;
+        static uint8_t wii_lx_shift[2] = { 0, 0 };
+        static uint8_t wii_ly_shift[2] = { 0, 0 };
+        static uint8_t wii_rx_shift[2] = { 0, 0 };
+        static uint8_t wii_ry_shift[2] = { 0, 0 };
       #endif
 
-     
       #ifdef ENABLE_REFLEX_PAD
-        static ExtensionType lastPadType[] = { ExtensionType::UnknownController };
-        ExtensionType currentPadType[] = { ExtensionType::NoController };
-      #endif
-    
-      #ifdef ENABLE_REFLEX_PAD
+        static ExtensionType lastPadType[] = { ExtensionType::UnknownController, ExtensionType::UnknownController };
+        ExtensionType currentPadType[] = { ExtensionType::NoController, ExtensionType::NoController };
         static bool firstTime = true;
         if(firstTime) {
           firstTime = false;
-          ShowDefaultPadWii(0, ExtensionType::NoController);
+          for (uint8_t i = 0; i < totalUsb; ++i) {
+            ShowDefaultPadWii(i, ExtensionType::NoController);
+          }
         }
       #endif
-    
+
       bool stateChanged = false;
-    
-    
-      if (!haveController) {
-        if (wii->connect()) {
-          //controller connected
-          haveController = true;
-          needDetectAnalogTrigger = true;
-          isClassicAnalog = false;
-          wiiResetJoyValues(0);
-          #ifdef ENABLE_REFLEX_PAD
-            ShowDefaultPadWii(0, wii->getControllerType());
-          #endif
-          sleepTime = DEFAULT_SLEEP_TIME;
-        } else {
-          sleepTime = 50000;
-        }
-      } else {
-        if (!wii->update()) {
-          //controller removed
-          haveController = false;
-          hasAnalogTriggers[0] = false;
-          sleepTime = 50000;
-          wiiResetJoyValues(0);
-          oldButtons = 0; //reset previous state
-          #ifdef ENABLE_REFLEX_PAD
-            ShowDefaultPadWii(0, ExtensionType::NoController);
-          #endif
-        } else {
-          //controller read sucess
-          
-          uint16_t buttonData = 0;
-          uint8_t hatData = 0;
-          uint8_t leftX = 0;
-          uint8_t leftY = 0;
-          uint8_t rightX = 0;
-          uint8_t rightY = 0;
-          uint8_t lt = 255;
-          uint8_t rt = 255;
-    
-          const ExtensionType conType = wii->getControllerType();
-    
-          //only handle data from Classic or Nunchuk
-          if(conType == ExtensionType::ClassicController || conType == ExtensionType::Nunchuk
-#ifdef ENABLE_WII_GUITAR
-          || conType == ExtensionType::GuitarController
-#endif
-          ) {
-    
-            if(conType == ExtensionType::ClassicController) {
-              bitWrite(hatData, 0, !wii_classic->dpadUp());
-              bitWrite(hatData, 1, !wii_classic->dpadDown());
-              bitWrite(hatData, 2, !wii_classic->dpadLeft());
-              bitWrite(hatData, 3, !wii_classic->dpadRight());
-              
-              bitWrite(buttonData, 0, wii_classic->buttonY());
-              bitWrite(buttonData, 1, wii_classic->buttonB());
-              bitWrite(buttonData, 2, wii_classic->buttonA());
-              bitWrite(buttonData, 3, wii_classic->buttonX());
-              bitWrite(buttonData, 4, wii_classic->buttonL());
-              bitWrite(buttonData, 5, wii_classic->buttonR());
-              bitWrite(buttonData, 6, wii_classic->buttonZL());
-              bitWrite(buttonData, 7, wii_classic->buttonZR());
-              bitWrite(buttonData, 8, wii_classic->buttonMinus());
-              bitWrite(buttonData, 9, wii_classic->buttonPlus());
-              bitWrite(buttonData, 10, wii_classic->buttonHome());
+      bool anyController = false;
 
-              leftX = wii_classic->leftJoyX();
-              leftY = wii_classic->leftJoyY();
-              rightX = wii_classic->rightJoyX();
-              rightY = wii_classic->rightJoyY();
-              lt = wii_classic->triggerL();
-              rt = wii_classic->triggerR();
+      for (uint8_t i = 0; i < totalUsb; ++i) {
+        ExtensionPort* port = wii[i];
+        ClassicController::Shared* classic = wii_classic[i];
+        Nunchuk::Shared* nchuk = wii_nchuk[i];
+        #ifdef ENABLE_WII_GUITAR
+          GuitarController::Shared* guitar = wii_guitar[i];
+        #endif
 
-
-              if (needDetectAnalogTrigger) {
-                needDetectAnalogTrigger = false;
-
-              #ifndef WII_ANALOG_RAW
-                wii_lx_shift = (leftX >= 127) ? (leftX - 127) : (127 - leftX);
-                wii_ly_shift = (leftY >= 127) ? (leftY - 127) : (127 - leftY);
-                wii_rx_shift = (rightX >= 127) ? (rightX - 127) : (127 - rightX);
-                wii_ry_shift = (rightY >= 127) ? (rightY - 127) : (127 - rightY);
-              #endif
-
-
-                //if any "analog" trigger is zero, we can assume it's a digital device. need to test with more controllers.
-                isClassicAnalog = !(lt == 0 || rt == 0);
-                if (isClassicAnalog && canUseAnalogTrigger()) {
-                  hasAnalogTriggers[0] = true;
-                }
-              }
-
-//              if (canUseAnalogTrigger()) {
-//                hasAnalogTriggers[0] = true;
-//              }
-
-              state[0].dpad = 0
-                | (wii_classic->dpadUp()    ? GAMEPAD_MASK_UP    : 0)
-                | (wii_classic->dpadDown()  ? GAMEPAD_MASK_DOWN  : 0)
-                | (wii_classic->dpadLeft()  ? GAMEPAD_MASK_LEFT  : 0)
-                | (wii_classic->dpadRight() ? GAMEPAD_MASK_RIGHT : 0)
-              ;
-
-              state[0].buttons = 0
-                | (wii_classic->buttonB()  ? GAMEPAD_MASK_B1 : 0) // Generic: K1, Switch: B, Xbox: A
-                | (wii_classic->buttonA()  ? GAMEPAD_MASK_B2 : 0) // Generic: K2, Switch: A, Xbox: B
-                | (wii_classic->buttonY()  ? GAMEPAD_MASK_B3 : 0) // Generic: P1, Switch: Y, Xbox: X
-                | (wii_classic->buttonX()  ? GAMEPAD_MASK_B4 : 0) // Generic: P2, Switch: X, Xbox: Y
-//                | (wii_classic->buttonZL() ? GAMEPAD_MASK_L1 : 0) // Generic: P4, Switch: L, Xbox: LB
-//                | (wii_classic->buttonZR() ? GAMEPAD_MASK_R1 : 0) // Generic: P3, Switch: R, Xbox: RB
-//                | (wii_classic->buttonL()  ? GAMEPAD_MASK_L2 : 0) // Generic: K4, Switch: ZL, Xbox: LT (Digital)
-//                | (wii_classic->buttonR()  ? GAMEPAD_MASK_R2 : 0) // Generic: K3, Switch: ZR, Xbox: RT (Digital)
-                | (wii_classic->buttonMinus() ? GAMEPAD_MASK_S1 : 0) // Generic: Select, Switch: -, Xbox: View
-                | (wii_classic->buttonPlus() ? GAMEPAD_MASK_S2 : 0) // Generic: Start, Switch: +, Xbox: Menu
-                //| (LCLICK ? GAMEPAD_MASK_L3 : 0) // All: Left Stick Click
-                //| (RCLICK ? GAMEPAD_MASK_R3 : 0) // All: Right Stick Click
-                | (wii_classic->buttonHome() ? GAMEPAD_MASK_A1 : 0) // Switch: Home, Xbox: Guide
-              ;
-
-              //swap L/ZL
-              if (isClassicAnalog) { //classic controller with analog triggers (RVL-005)
-                state[0].buttons = state[0].buttons
-                  | (wii_classic->buttonZL() ? GAMEPAD_MASK_L1 : 0) // Generic: P4, Switch: L, Xbox: LB
-                  | (wii_classic->buttonZR() ? GAMEPAD_MASK_R1 : 0) // Generic: P3, Switch: R, Xbox: RB
-                  | (wii_classic->buttonL()  ? GAMEPAD_MASK_L2 : 0) // Generic: K4, Switch: ZL, Xbox: LT (Digital)
-                  | (wii_classic->buttonR()  ? GAMEPAD_MASK_R2 : 0) // Generic: K3, Switch: ZR, Xbox: RT (Digital)
-//                  | (lt >= wii_analog_trigger_min  ? GAMEPAD_MASK_L2 : 0) // Generic: K4, Switch: ZL, Xbox: LT (Digital)
-//                  | (rt >= wii_analog_trigger_min  ? GAMEPAD_MASK_R2 : 0) // Generic: K3, Switch: ZR, Xbox: RT (Digital)
-                ;
-              } else {
-                state[0].buttons = state[0].buttons
-                  | (wii_classic->buttonL()  ? GAMEPAD_MASK_L1 : 0) // Generic: P4, Switch: L, Xbox: LB
-                  | (wii_classic->buttonR()  ? GAMEPAD_MASK_R1 : 0) // Generic: P3, Switch: R, Xbox: RB
-                  | (wii_classic->buttonZL() ? GAMEPAD_MASK_L2 : 0) // Generic: K4, Switch: ZL, Xbox: LT (Digital)
-                  | (wii_classic->buttonZR() ? GAMEPAD_MASK_R2 : 0) // Generic: K3, Switch: ZR, Xbox: RT (Digital)
-                ;
-              }
-    
-#ifdef ENABLE_WII_GUITAR
-            } else if (conType == ExtensionType::GuitarController) {
-              bitWrite(buttonData, 0, wii_guitar->fretBlue());
-              bitWrite(buttonData, 1, wii_guitar->fretRed());
-              bitWrite(buttonData, 2, wii_guitar->fretGreen());
-              bitWrite(buttonData, 3, wii_guitar->fretYellow());
-              bitWrite(buttonData, 4, wii_guitar->fretOrange());
-              
-              bitWrite(buttonData, 8, wii_classic->buttonMinus());
-              bitWrite(buttonData, 9, wii_classic->buttonPlus());
-    
-              bitWrite(hatData, 0, !wii_guitar->strumUp());
-              bitWrite(hatData, 1, !wii_guitar->strumDown());
-              bitWrite(hatData, 2, 1);
-              bitWrite(hatData, 3, 1);
-    
-              if (wii_guitar->supportsTouchbar()) {
-                //uint8_t tbar = wii_guitar->touchbar();
-                bitWrite(buttonData, 5, wii_guitar->touchBlue());
-                bitWrite(buttonData, 6, wii_guitar->touchRed());
-                bitWrite(buttonData, 7, wii_guitar->touchGreen());
-                bitWrite(buttonData, 10, wii_guitar->touchYellow());
-                bitWrite(buttonData, 11, wii_guitar->touchOrange());
-              }
-    
-              //analog stick (0-63)
-              leftX = map(wii_guitar->joyX(), 0, 63, 0, 255);
-              leftY = map(wii_guitar->joyY(), 0, 63, 0, 255);
-    
-              //whammy bar (0-31, starting around 15-16)
-              //on my GH:WoR guitar it goes from 15 to 25
-              //rightX = map(wii_guitar->whammyBar(), 0, 31, 0, 255);
-              //rightX = map(wii_guitar->whammyBar(), 15, 31, 0, 255);
-              rightX = map(wii_guitar->whammyBar(), 15, 25, 0, 255);
-#endif //ENABLE_WII_GUITAR
-    
-            } else { //nunchuk
-              bitWrite(buttonData, 0, wii_nchuk->buttonC());
-              bitWrite(buttonData, 1, wii_nchuk->buttonZ());
-              state[0].buttons = 0
-                | (wii_nchuk->buttonC() ? GAMEPAD_MASK_B1 : 0) // Generic: K1, Switch: B, Xbox: A
-                | (wii_nchuk->buttonZ() ? GAMEPAD_MASK_B2 : 0) // Generic: K2, Switch: A, Xbox: B
-              ;
-    
-              leftX = wii_nchuk->joyX();
-              leftY = wii_nchuk->joyY();
-            }
-            
-          }//end if classiccontroller / nunckuk
-    
-          bool buttonsChanged = buttonData != oldButtons || hatData != oldHat;
-          bool analogChanged = (leftX != oldLX) || (leftY != oldLY) || (rightX != oldRX) || (rightY != oldRY) || (lt != oldLT) || (rt != oldRT);
-    
-          if (buttonsChanged || analogChanged) { //state changed?
-            stateChanged = buttonsChanged;
-
-            #ifndef WII_ANALOG_RAW
-              //shift to center
-              leftX -= wii_lx_shift;
-              leftY -= wii_ly_shift;
-              rightX -= wii_rx_shift;
-              rightY -= wii_ry_shift;
-              
-              //clamp
-              if (leftX < wii_analog_stick_min) leftX = wii_analog_stick_min;
-              else if (leftX > wii_analog_stick_max) leftX = wii_analog_stick_max;
-              if (leftY < wii_analog_stick_min) leftY = wii_analog_stick_min;
-              else if (leftY > wii_analog_stick_max) leftY = wii_analog_stick_max;
-
-              if (rightX < wii_analog_stick_min) rightX = wii_analog_stick_min;
-              else if (rightX > wii_analog_stick_max) rightX = wii_analog_stick_max;
-              if (rightY < wii_analog_stick_min) rightY = wii_analog_stick_min;
-              else if (rightY > wii_analog_stick_max) rightY = wii_analog_stick_max;
-
-              //scale
-              leftX =  map(leftX,  wii_analog_stick_min, wii_analog_stick_max, 0, 255);
-              leftY =  map(leftY,  wii_analog_stick_min, wii_analog_stick_max, 0, 255);
-              rightX = map(rightX, wii_analog_stick_min, wii_analog_stick_max, 0, 255);
-              rightY = map(rightY, wii_analog_stick_min, wii_analog_stick_max, 0, 255);
-            #endif
-                
-            state[0].lx = convertAnalog( leftX);
-            state[0].ly = convertAnalog((uint8_t)~leftY);
-            state[0].rx = convertAnalog( rightX);
-            state[0].ry = convertAnalog((uint8_t)~rightY);
-            #ifndef WII_ANALOG_RAW
-              if (isClassicAnalog) {
-                if (lt < wii_analog_trigger_min) lt = 0;
-                if (rt < wii_analog_trigger_min) rt = 0;
-                lt = wii_classic->buttonL() ? 0xFF : lt;
-                rt = wii_classic->buttonR() ? 0xFF : rt;
-              }
-            #endif
-
-              state[0].lt = lt;
-              state[0].rt = rt;
-
-
-//            display.clear();
-//            display.println(leftX);
-//            display.println(leftY);
-//            delay(200);
-                
+        if (!haveController[i]) {
+          if (port->connect()) {
+            haveController[i] = true;
+            needDetectAnalogTrigger[i] = true;
+            isClassicAnalog[i] = false;
+            wiiResetJoyValues(i);
             #ifdef ENABLE_REFLEX_PAD
-              //const uint8_t startCol = inputPort == 0 ? 0 : 11*6;
-              const uint8_t nbuttons = (conType == ExtensionType::ClassicController || conType == ExtensionType::GuitarController) ? 15 : 2;
-              for(uint8_t x = 0; x < nbuttons; ++x){
-                const Pad pad = padWii[x];
-                if(x < 11) //buttons
-                  PrintPadChar(0, padDivision[0].firstCol, pad.col, pad.row, pad.padvalue, bitRead(buttonData, x), pad.on, pad.off);
-                else //dpad
-                  PrintPadChar(0, padDivision[0].firstCol, pad.col, pad.row, pad.padvalue, !bitRead(hatData, x-11), pad.on, pad.off);
-              }
+              ShowDefaultPadWii(i, port->getControllerType());
             #endif
+          }
+          continue;
+        }
+
+        if (!port->update()) {
+          haveController[i] = false;
+          hasAnalogTriggers[i] = false;
+          wiiResetJoyValues(i);
+          oldButtons[i] = 0;
+          #ifdef ENABLE_REFLEX_PAD
+            ShowDefaultPadWii(i, ExtensionType::NoController);
+          #endif
+          continue;
+        }
+
+        anyController = true;
+
+        uint16_t buttonData = 0;
+        uint8_t hatData = 0;
+        uint8_t leftX = 0;
+        uint8_t leftY = 0;
+        uint8_t rightX = 0;
+        uint8_t rightY = 0;
+        uint8_t lt = 255;
+        uint8_t rt = 255;
+
+        const ExtensionType conType = port->getControllerType();
+
+        if(conType == ExtensionType::ClassicController || conType == ExtensionType::Nunchuk
+        #ifdef ENABLE_WII_GUITAR
+          || conType == ExtensionType::GuitarController
+        #endif
+        ) {
+
+          if(conType == ExtensionType::ClassicController) {
+            bitWrite(hatData, 0, !classic->dpadUp());
+            bitWrite(hatData, 1, !classic->dpadDown());
+            bitWrite(hatData, 2, !classic->dpadLeft());
+            bitWrite(hatData, 3, !classic->dpadRight());
             
-            //keep values
-            oldButtons = buttonData;
-            oldHat = hatData;
-            oldLX = leftX;
-            oldLY = leftY;
-            oldRX = rightX;
-            oldRY = rightY;
-            oldLT = lt;
-            oldRT = rt;
-          }//end if statechanged
-    
-        }//end else pad read
-      }//end havecontroller
-    
-    
-      return stateChanged; //joyCount != 0;
+            bitWrite(buttonData, 0, classic->buttonY());
+            bitWrite(buttonData, 1, classic->buttonB());
+            bitWrite(buttonData, 2, classic->buttonA());
+            bitWrite(buttonData, 3, classic->buttonX());
+            bitWrite(buttonData, 4, classic->buttonL());
+            bitWrite(buttonData, 5, classic->buttonR());
+            bitWrite(buttonData, 6, classic->buttonZL());
+            bitWrite(buttonData, 7, classic->buttonZR());
+            bitWrite(buttonData, 8, classic->buttonMinus());
+            bitWrite(buttonData, 9, classic->buttonPlus());
+            bitWrite(buttonData, 10, classic->buttonHome());
+
+            leftX = classic->leftJoyX();
+            leftY = classic->leftJoyY();
+            rightX = classic->rightJoyX();
+            rightY = classic->rightJoyY();
+            lt = classic->triggerL();
+            rt = classic->triggerR();
+
+
+            if (needDetectAnalogTrigger[i]) {
+              needDetectAnalogTrigger[i] = false;
+
+            #ifndef WII_ANALOG_RAW
+              wii_lx_shift[i] = (leftX >= 127) ? (leftX - 127) : (127 - leftX);
+              wii_ly_shift[i] = (leftY >= 127) ? (leftY - 127) : (127 - leftY);
+              wii_rx_shift[i] = (rightX >= 127) ? (rightX - 127) : (127 - rightX);
+              wii_ry_shift[i] = (rightY >= 127) ? (rightY - 127) : (127 - rightY);
+            #endif
+
+
+              isClassicAnalog[i] = !(lt == 0 || rt == 0);
+              if (isClassicAnalog[i] && canUseAnalogTrigger()) {
+                hasAnalogTriggers[i] = true;
+              }
+            }
+
+            state[i].dpad = 0
+              | (classic->dpadUp()    ? GAMEPAD_MASK_UP    : 0)
+              | (classic->dpadDown()  ? GAMEPAD_MASK_DOWN  : 0)
+              | (classic->dpadLeft()  ? GAMEPAD_MASK_LEFT  : 0)
+              | (classic->dpadRight() ? GAMEPAD_MASK_RIGHT : 0);
+
+            state[i].buttons = 0
+              | (classic->buttonB()  ? GAMEPAD_MASK_B1 : 0)
+              | (classic->buttonA()  ? GAMEPAD_MASK_B2 : 0)
+              | (classic->buttonY()  ? GAMEPAD_MASK_B3 : 0)
+              | (classic->buttonX()  ? GAMEPAD_MASK_B4 : 0)
+              | (classic->buttonMinus() ? GAMEPAD_MASK_S1 : 0)
+              | (classic->buttonPlus() ? GAMEPAD_MASK_S2 : 0)
+              | (classic->buttonHome() ? GAMEPAD_MASK_A1 : 0);
+
+            if (isClassicAnalog[i]) {
+              state[i].buttons = state[i].buttons
+                | (classic->buttonZL() ? GAMEPAD_MASK_L1 : 0)
+                | (classic->buttonZR() ? GAMEPAD_MASK_R1 : 0)
+                | (classic->buttonL()  ? GAMEPAD_MASK_L2 : 0)
+                | (classic->buttonR()  ? GAMEPAD_MASK_R2 : 0);
+            } else {
+              state[i].buttons = state[i].buttons
+                | (classic->buttonL()  ? GAMEPAD_MASK_L1 : 0)
+                | (classic->buttonR()  ? GAMEPAD_MASK_R1 : 0)
+                | (classic->buttonZL() ? GAMEPAD_MASK_L2 : 0)
+                | (classic->buttonZR() ? GAMEPAD_MASK_R2 : 0);
+            }
+
+#ifdef ENABLE_WII_GUITAR
+          } else if (conType == ExtensionType::GuitarController) {
+            bitWrite(buttonData, 0, guitar->fretBlue());
+            bitWrite(buttonData, 1, guitar->fretRed());
+            bitWrite(buttonData, 2, guitar->fretGreen());
+            bitWrite(buttonData, 3, guitar->fretYellow());
+            bitWrite(buttonData, 4, guitar->fretOrange());
+            
+            bitWrite(buttonData, 8, classic->buttonMinus());
+            bitWrite(buttonData, 9, classic->buttonPlus());
+  
+            bitWrite(hatData, 0, !guitar->strumUp());
+            bitWrite(hatData, 1, !guitar->strumDown());
+            bitWrite(hatData, 2, 1);
+            bitWrite(hatData, 3, 1);
+  
+            if (guitar->supportsTouchbar()) {
+              bitWrite(buttonData, 5, guitar->touchBlue());
+              bitWrite(buttonData, 6, guitar->touchRed());
+              bitWrite(buttonData, 7, guitar->touchGreen());
+              bitWrite(buttonData, 10, guitar->touchYellow());
+              bitWrite(buttonData, 11, guitar->touchOrange());
+            }
+  
+            leftX = map(guitar->joyX(), 0, 63, 0, 255);
+            leftY = map(guitar->joyY(), 0, 63, 0, 255);
+  
+            rightX = map(guitar->whammyBar(), 15, 25, 0, 255);
+#endif //ENABLE_WII_GUITAR
+  
+          } else { //nunchuk
+            bitWrite(buttonData, 0, nchuk->buttonC());
+            bitWrite(buttonData, 1, nchuk->buttonZ());
+            state[i].buttons = 0
+              | (nchuk->buttonC() ? GAMEPAD_MASK_B1 : 0)
+              | (nchuk->buttonZ() ? GAMEPAD_MASK_B2 : 0);
+  
+            leftX = nchuk->joyX();
+            leftY = nchuk->joyY();
+          }
+          
+        }//end if classiccontroller / nunckuk
+
+        bool buttonsChanged = buttonData != oldButtons[i] || hatData != oldHat[i];
+        bool analogChanged = (leftX != oldLX[i]) || (leftY != oldLY[i]) || (rightX != oldRX[i]) || (rightY != oldRY[i]) || (lt != oldLT[i]) || (rt != oldRT[i]);
+
+        if (buttonsChanged || analogChanged) { //state changed?
+          stateChanged = stateChanged || buttonsChanged;
+
+          #ifndef WII_ANALOG_RAW
+            leftX -= wii_lx_shift[i];
+            leftY -= wii_ly_shift[i];
+            rightX -= wii_rx_shift[i];
+            rightY -= wii_ry_shift[i];
+            
+            if (leftX < wii_analog_stick_min) leftX = wii_analog_stick_min;
+            else if (leftX > wii_analog_stick_max) leftX = wii_analog_stick_max;
+            if (leftY < wii_analog_stick_min) leftY = wii_analog_stick_min;
+            else if (leftY > wii_analog_stick_max) leftY = wii_analog_stick_max;
+
+            if (rightX < wii_analog_stick_min) rightX = wii_analog_stick_min;
+            else if (rightX > wii_analog_stick_max) rightX = wii_analog_stick_max;
+            if (rightY < wii_analog_stick_min) rightY = wii_analog_stick_min;
+            else if (rightY > wii_analog_stick_max) rightY = wii_analog_stick_max;
+
+            leftX =  map(leftX,  wii_analog_stick_min, wii_analog_stick_max, 0, 255);
+            leftY =  map(leftY,  wii_analog_stick_min, wii_analog_stick_max, 0, 255);
+            rightX = map(rightX, wii_analog_stick_min, wii_analog_stick_max, 0, 255);
+            rightY = map(rightY, wii_analog_stick_min, wii_analog_stick_max, 0, 255);
+
+            if (isClassicAnalog[i]) {
+              if (lt < wii_analog_trigger_min) lt = 0;
+              if (rt < wii_analog_trigger_min) rt = 0;
+              lt = classic->buttonL() ? 0xFF : lt;
+              rt = classic->buttonR() ? 0xFF : rt;
+            }
+          #endif
+
+          state[i].lx = convertAnalog( leftX);
+          state[i].ly = convertAnalog((uint8_t)~leftY);
+          state[i].rx = convertAnalog( rightX);
+          state[i].ry = convertAnalog((uint8_t)~rightY);
+          state[i].lt = lt;
+          state[i].rt = rt;
+
+          #ifdef ENABLE_REFLEX_PAD
+            const uint8_t nbuttons = (conType == ExtensionType::ClassicController || conType == ExtensionType::GuitarController) ? 15 : 2;
+            for(uint8_t x = 0; x < nbuttons; ++x){
+              const Pad pad = padWii[x];
+              if(x < 11) //buttons
+                PrintPadChar(i, padDivision[i].firstCol, pad.col, pad.row, pad.padvalue, bitRead(buttonData, x), pad.on, pad.off);
+              else //dpad
+                PrintPadChar(i, padDivision[i].firstCol, pad.col, pad.row, pad.padvalue, !bitRead(hatData, x-11), pad.on, pad.off);
+            }
+          #endif
+          
+          oldButtons[i] = buttonData;
+          oldHat[i] = hatData;
+          oldLX[i] = leftX;
+          oldLY[i] = leftY;
+          oldRX[i] = rightX;
+          oldRY[i] = rightY;
+          oldLT[i] = lt;
+          oldRT[i] = rt;
+        }//end if statechanged
+
+      }//end bus loop
+
+      sleepTime = anyController ? DEFAULT_SLEEP_TIME : 50000;
+
+      return stateChanged;
     }//end read
 
 };

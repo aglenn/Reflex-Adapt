@@ -23,9 +23,9 @@
 //Also configured in:
 //NXC_Comms.h
 
-#define SCL_PIN 5// D9/A9/PB5
+#define SCL_PIN PB5// D9/A9/PB5
 #define SCL_PORT PORTB
-#define SDA_PIN 4// D8/A8/PB4
+#define SDA_PIN PB4// D8/A8/PB4
 #define SDA_PORT PORTB
 
 #define I2C_FASTMODE 0
@@ -41,9 +41,9 @@
 #undef SCL_PORT
 #undef SDA_PIN
 #undef SDA_PORT
-#define SCL_PIN 2  // D16/PB2 on 32u4
+#define SCL_PIN PF5  // D16/PB2 on 32u4
 #define SCL_PORT PORTB
-#define SDA_PIN 3  // D14/PB3 on 32u4
+#define SDA_PIN PF6  // D14/PB3 on 32u4
 #define SDA_PORT PORTB
 
 // Ensure SoftWire2 brings in its implementation

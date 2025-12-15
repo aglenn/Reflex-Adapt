@@ -42,9 +42,9 @@
 #undef SDA_PIN
 #undef SDA_PORT
 #define SCL_PIN PF5  // D16/PB2 on 32u4
-#define SCL_PORT PORTB
+#define SCL_PORT PORTF
 #define SDA_PIN PF6  // D14/PB3 on 32u4
-#define SDA_PORT PORTB
+#define SDA_PORT PORTF
 
 // Ensure SoftWire2 brings in its implementation
 #undef USE_SOFTWIRE_H_AS_PLAIN_INCLUDE
